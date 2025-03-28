@@ -1,3 +1,81 @@
+```python
+import os
+import shutil
+import json
+
+def copy_and_rename_files(source_root, dest_images, dest_videos):
+    # 确保目标文件夹存在
+    os.makedirs(dest_images, exist_ok=True)
+    os.makedirs(dest_videos, exist_ok=True)
+
+    # 遍历源路径下的所有文件夹
+    for folder_name in os.listdir(source_root):
+        folder_path = os.path.join(source_root, folder_name)
+        
+        if not os.path.isdir(folder_path):
+            continue  # 跳过非文件夹
+
+        # 查找 videoinfo.json
+        json_path = os.path.join(folder_path, "videoinfo.json")
+        if not os.path.exists(json_path):
+            print(f"⚠️ No videoinfo.json found in {folder_path}")
+            continue
+
+        # 解析 JSON 获取 title
+        try:
+            with open(json_path, "r", encoding="utf-8") as f:
+                video_info = json.load(f)
+                title = video_info.get("title", "").strip()
+                if not title:
+                    print(f"⚠️ Empty title in {json_path}")
+                    continue
+        except Exception as e:
+            print(f"❌ Failed to parse {json_path}: {e}")
+            continue
+
+        # 查找 image.jpg 和 .mp4 文件
+        image_file = None
+        mp4_file = None
+
+        for file in os.listdir(folder_path):
+            file_lower = file.lower()
+            if file_lower == "image.jpg":
+                image_file = os.path.join(folder_path, file)
+            elif file_lower.endswith(".mp4"):
+                mp4_file = os.path.join(folder_path, file)
+
+        # 处理非法文件名字符（替换为下划线）
+        safe_title = "".join(c if c.isalnum() or c in (" ", "-", "_") else "_" for c in title)
+
+        # 拷贝并重命名 image.jpg
+        if image_file:
+            dest_image = os.path.join(dest_images, f"{safe_title}.jpg")
+            shutil.copy2(image_file, dest_image)
+            print(f"✅ Copied image: {image_file} → {dest_image}")
+        else:
+            print(f"⚠️ No image.jpg found in {folder_path}")
+
+        # 拷贝并重命名 .mp4
+        if mp4_file:
+            dest_video = os.path.join(dest_videos, f"{safe_title}.mp4")
+            shutil.copy2(mp4_file, dest_video)
+            print(f"✅ Copied video: {mp4_file} → {dest_video}")
+        else:
+            print(f"⚠️ No .mp4 file found in {folder_path}")
+
+if __name__ == "__main__":
+    # 源文件夹路径
+    source_path = r"C:\Users\DELL\Videos\bilibili\output\原神-sketch"
+
+    # 目标文件夹路径（存放图片和视频）
+    dest_images = r"C:\Users\DELL\Videos\bilibili\output\images"
+    dest_videos = r"C:\Users\DELL\Videos\bilibili\output\videos"
+
+    copy_and_rename_files(source_path, dest_images, dest_videos)
+    print("🎉 文件拷贝和重命名完成！")
+```
+
+
 ## 为什么开发此程序？
 bilibili下架了很多视频，之前收藏和缓存的视频均无法播放
 
