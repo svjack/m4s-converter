@@ -1,3 +1,5 @@
+#### 构建视频数据集
+
 ```python
 import os
 import shutil
@@ -75,6 +77,169 @@ if __name__ == "__main__":
     print("🎉 文件拷贝和重命名完成！")
 ```
 
+#### 视频抽象功能
+```python
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Optional
+import cv2
+import numpy as np
+import logging
+
+logger = logging.getLogger(__name__)
+
+@dataclass
+class Frame:
+    number: int
+    path: Path
+    timestamp: float
+    score: float
+
+def create_abstract_video(
+    input_video_path: Path,
+    output_video_path: Path,
+    frames_per_minute: int = 10,
+    duration: Optional[float] = None,
+    max_frames: Optional[int] = None,
+    frame_difference_threshold: float = 1.0,
+    target_duration: Optional[float] = 4
+) -> None:
+    """
+    Create an abstract video by extracting and saving keyframes from the input video,
+    maintaining the original temporal order of the frames and optionally adjusting to target duration.
+    
+    Args:
+        input_video_path: Path to the input video file
+        output_video_path: Path where the abstract video will be saved
+        frames_per_minute: Target number of frames per minute in output
+        duration: Maximum duration (in seconds) to process from input video
+        max_frames: Maximum number of frames to include in output
+        frame_difference_threshold: Minimum difference score to consider a frame as keyframe
+        target_duration: Desired duration of output video in seconds (frames will be evenly distributed)
+    """
+    def _calculate_frame_difference(frame1: np.ndarray, frame2: np.ndarray) -> float:
+        """Calculate the difference between two frames using absolute difference."""
+        if frame1 is None or frame2 is None:
+            return 0.0
+        
+        gray1 = cv2.cvtColor(frame1, cv2.COLOR_BGR2GRAY)
+        gray2 = cv2.cvtColor(frame2, cv2.COLOR_BGR2GRAY)
+        diff = cv2.absdiff(gray1, gray2)
+        return float(np.mean(diff))
+
+    # Open input video
+    cap = cv2.VideoCapture(str(input_video_path))
+    if not cap.isOpened():
+        raise ValueError(f"Could not open video file: {input_video_path}")
+    
+    fps = cap.get(cv2.CAP_PROP_FPS)
+    total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+    video_duration = total_frames / fps
+    
+    if duration:
+        video_duration = min(duration, video_duration)
+        total_frames = int(min(total_frames, duration * fps))
+    
+    # Calculate target number of frames
+    target_frames = max(1, min(
+        int((video_duration / 60) * frames_per_minute),
+        total_frames,
+        max_frames if max_frames is not None else float('inf')
+    ))
+    
+    # Calculate adaptive sampling interval
+    sample_interval = max(1, total_frames // (target_frames * 2))
+    
+    # Extract keyframe candidates while maintaining order
+    frame_candidates = []
+    prev_frame = None
+    frame_count = 0
+    
+    while frame_count < total_frames:
+        ret, frame = cap.read()
+        if not ret:
+            break
+            
+        if frame_count % sample_interval == 0:
+            score = _calculate_frame_difference(frame, prev_frame)
+            if score > frame_difference_threshold:
+                timestamp = frame_count / fps
+                frame_candidates.append((frame_count, frame, score, timestamp))
+            prev_frame = frame.copy()
+            
+        frame_count += 1
+        
+    cap.release()
+    
+    # Sort candidates by frame number to maintain temporal order
+    frame_candidates.sort(key=lambda x: x[0])
+    
+    # Select frames evenly spaced while preserving order
+    if len(frame_candidates) > target_frames:
+        step = len(frame_candidates) / target_frames
+        indices = [int(i * step) for i in range(target_frames)]
+        selected_frames = [frame_candidates[i] for i in indices]
+    else:
+        selected_frames = frame_candidates
+
+    # Adjust frame display durations if target_duration is specified
+    if target_duration is not None and target_duration > 0:
+        # Calculate how many times each frame should be repeated
+        total_frames_needed = int(target_duration * fps)
+        frames_count = len(selected_frames)
+        
+        if frames_count == 0:
+            raise ValueError("No keyframes were selected for the output video")
+            
+        # Calculate repeat counts for each frame to evenly distribute
+        base_repeats = total_frames_needed // frames_count
+        remainder = total_frames_needed % frames_count
+        
+        frame_repeats = [base_repeats + 1 if i < remainder else base_repeats 
+                         for i in range(frames_count)]
+    else:
+        # Default: each frame appears once
+        frame_repeats = [1] * len(selected_frames)
+
+    # Create output video writer
+    if not selected_frames:
+        raise ValueError("No keyframes were selected for the output video")
+    
+    frame_height, frame_width = selected_frames[0][1].shape[:2]
+    fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+    
+    # Use original fps if no target duration, otherwise calculate new fps to match duration
+    output_fps = fps if target_duration is None else (sum(frame_repeats) / target_duration)
+    out = cv2.VideoWriter(str(output_video_path), fourcc, output_fps, (frame_width, frame_height))
+    
+    # Write selected frames to output video with proper repeats
+    for (frame_num, frame, score, timestamp), repeats in zip(selected_frames, frame_repeats):
+        for _ in range(repeats):
+            out.write(frame)
+    
+    out.release()
+    
+    actual_duration = sum(frame_repeats) / output_fps
+    logger.info(f"Created abstract video with {len(selected_frames)} keyframes "
+                f"at {output_video_path}, duration: {actual_duration:.2f}s")
+
+# Example usage:
+# create_abstract_video(Path("input.mp4"), Path("output.mp4"), 
+#                      frames_per_minute=15, target_duration=30)  # 30 second output
+
+create_abstract_video(
+    r"C:\Users\DELL\Downloads\Genshin_StarRail_Longshu_Sketch_Tail_Videos_Reversed\reversed_卡维兴奋了___ - Made with Clipchamp.mp4",
+    "reversed_卡维兴奋了___ - Made with Clipchamp.mp4",
+    frames_per_minute = 60
+)
+
+create_abstract_video(
+    r"C:\Users\DELL\Downloads\Genshin_StarRail_Longshu_Sketch_Tail_Videos_Reversed\reversed_海哥_卡维默契了一把 - Made with Clipchamp.mp4",
+    "reversed_海哥_卡维默契了一把 - Made with Clipchamp.mp4",
+    frames_per_minute = 60,
+    target_duration = 2
+)
+```
 
 ## 为什么开发此程序？
 bilibili下架了很多视频，之前收藏和缓存的视频均无法播放
